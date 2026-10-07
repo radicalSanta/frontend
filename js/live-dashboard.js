@@ -76,6 +76,45 @@
     }
   }
 
+  function updateAlertAndAdvisory(data) {
+    const ems = data?.ems || {};
+    const advisory = data?.advisory || {};
+
+    const alertLevel = ems.alertLevel || ems.alert_level;
+    const primaryDriver = ems.primaryDriver || ems.primary_driver;
+    const advisoryMessage = advisory.message || data?.advisory?.advisory;
+
+    if (alertLevel) {
+      setText('ems-banner-title', `Alert: ${String(alertLevel).toUpperCase()}`);
+    }
+
+    if (primaryDriver) {
+      const readableDriver = String(primaryDriver)
+        .replace(/_/g, ' ')
+        .replace(/\\b\\w/g, (char) => char.toUpperCase());
+      setText('regional-alert-driver', readableDriver);
+    }
+
+    if (advisoryMessage) {
+      setText('ems-banner-desc', advisoryMessage);
+    }
+
+    const regional = document.getElementById('regional-ems-score');
+    if (regional && data.environmentalMonitoringScore != null) {
+      regional.textContent = Number(data.environmentalMonitoringScore).toFixed(1);
+    }
+
+    if (data?.ems?.groundStability != null) {
+      setText('regional-ground-stability', Number(data.ems.groundStability).toFixed(1));
+    }
+    if (data?.ems?.humanPressure != null) {
+      setText('regional-human-pressure', Number(data.ems.humanPressure).toFixed(1));
+    }
+    if (data?.ems?.environmentalQuality != null) {
+      setText('regional-environmental-quality', Number(data.ems.environmentalQuality).toFixed(1));
+    }
+  }
+
   function updateML(data) {
     const horizons = data?.pollution?.prediction || data?.pollution?.predictions;
     if (!horizons) return;
@@ -124,6 +163,7 @@
 
         updateSimpleCards(data);
         updateML(data);
+        updateAlertAndAdvisory(data);
         updateDiagnostics(data);
 
         window.dispatchEvent(new CustomEvent('greenpulse:live-data', {
