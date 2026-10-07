@@ -2,7 +2,7 @@
   'use strict';
 
   const DEFAULT_API_BASE_URL =
-    'https://wichita-barbie-extension-somewhere.trycloudflare.com';
+    'https://growth-patrick-myself-tapes.trycloudflare.com';
 
   function normalizeBaseUrl(value) {
     const raw = String(value || DEFAULT_API_BASE_URL).trim();
