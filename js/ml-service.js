@@ -264,113 +264,61 @@
      */
     async fetchPredictions(params = {}) {
       this.isPredicting = true;
-      const stationIdNum = this.toStationId(params.stationId || params.station_id || 1);
-      const baseline25 = params.baselinePm25 !== undefined ? Number(params.baselinePm25) : 60.0;
-      const baseline10 = params.baselinePm10 !== undefined ? Number(params.baselinePm10) : 89.0;
-
-      const payload = {
-        station_id: stationIdNum,
-        stationId: stationIdNum,
-        based_on_timestamp: new Date().toISOString(),
-        baselinePm25: baseline25,
-        baselinePm10: baseline10,
-        recentPrecipitation: params.recentPrecipitation ?? 0,
-        trafficFactor: params.trafficFactor ?? 1.0,
-        rainSimulationMm: params.rainSimulationMm ?? 0,
-        windDispersion: params.windDispersion ?? 1.0
-      };
 
       try {
-        let requestUrl = this.backendUrl;
-        // If user provided a swagger doc URL (e.g. http://127.0.0.1:8000/docs), target the /predict endpoint
-        if (requestUrl.includes('/docs')) {
-          requestUrl = requestUrl.replace(/\/docs\/?$/, '/predict');
-        }
-
-        const response = await fetch(requestUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(payload)
-        });
-
-        if (response.ok) {
-          const rawResult = await response.json();
-          // Check if response contains predictions object or is already wrapped
-          const backendData = rawResult.predictions ? rawResult : (rawResult.data?.predictions ? rawResult.data : rawResult);
-          if (backendData && backendData.predictions) {
-            const enriched = this.formatMLResponse(backendData, baseline25, baseline10);
-            this.modelMeta.status = this.isLocalhost()
-              ? 'Localhost ML Connected (200 OK)'
-              : 'Backend ML Connected (200 OK)';
-            return enriched;
+        const response = await fetch(
+          (window.BackendConfig ? window.BackendConfig.endpoint('/dashboard/readings') : '/dashboard/readings'),
+          {
+            method: 'GET',
+            headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache' },
+            cache: 'no-store'
           }
+        );
+
+        if (!response.ok) {
+          throw new Error(`Backend dashboard endpoint returned HTTP ${response.status}`);
         }
-        console.warn('Backend ML endpoint returned status:', response.status, 'Falling back to synchronized engine.');
-        return this._fallbackLocalInference(payload);
+
+        const live = await response.json();
+        const predictions = live?.pollution?.prediction || live?.pollution?.predictions;
+
+        if (!predictions) {
+          throw new Error(live?.mlStatus?.pollution || 'Pollution predictions are not available yet');
+        }
+
+        const baseline25 = Number(
+          params.baselinePm25 ??
+          live?.pollution?.pm25 ??
+          predictions['PM2.5_target_0h'] ??
+          0
+        );
+        const baseline10 = Number(
+          params.baselinePm10 ??
+          live?.pollution?.pm10 ??
+          predictions['PM10_target_0h'] ??
+          0
+        );
+
+        const stationId = this.toStationId(params.stationId || params.station_id || live?.stationId || 1);
+        const normalized = {
+          station_id: stationId,
+          station_slug: this.toStationSlug(stationId),
+          station_name: this.toStationName(stationId),
+          based_on_timestamp: live?.timestamp || new Date().toISOString(),
+          predictions
+        };
+
+        const enriched = this.formatMLResponse(normalized, baseline25, baseline10);
+        this.modelMeta.status = 'Live backend connected';
+        this.modelMeta.lastInference = new Date();
+        this.currentPredictions = enriched;
+        return enriched;
       } catch (err) {
-        console.warn('Network error reaching backend ML endpoint, using local synchronized engine:', err);
-        return this._fallbackLocalInference(payload);
+        this.modelMeta.status = 'Live backend unavailable';
+        throw err;
       } finally {
         this.isPredicting = false;
       }
-    },
-
-    /**
-     * Synchronized local neural inference engine conforming to exact backend JSON schema
-     */
-    _fallbackLocalInference(params) {
-      const now = new Date();
-      const stationId = this.toStationId(params.station_id || params.stationId || 1);
-      const baselinePm25 = parseFloat(params.baselinePm25) || 60.0;
-      const baselinePm10 = parseFloat(params.baselinePm10) || 89.0;
-      const rainSim = parseFloat(params.rainSimulationMm) || 0;
-      const traffic = parseFloat(params.trafficFactor) || 1.0;
-      const wind = parseFloat(params.windDispersion) || 1.0;
-
-      let currentPm25 = baselinePm25;
-      let currentPm10 = baselinePm10;
-
-      const predictionsMap = {};
-
-      for (let h = 1; h <= 5; h++) {
-        const targetTime = new Date(now.getTime() + h * 3600 * 1000);
-        const hour = targetTime.getHours();
-
-        let diurnal = 0.02 * traffic;
-        if ((hour >= 8 && hour <= 10) || (hour >= 17 && hour <= 20)) {
-          diurnal = 0.08 * traffic;
-        } else if (hour >= 1 && hour <= 5) {
-          diurnal = -0.08;
-        }
-
-        const rainScrubbing = Math.min(0.40, (rainSim * 0.12 + (params.recentPrecipitation || 0) * 0.06));
-        const windDecay = (wind - 1.0) * 0.06;
-
-        const pm25Noise = Math.sin(h * 1.7) * 0.28;
-        const pm10Noise = Math.cos(h * 1.5) * 0.52;
-
-        const pred25 = Math.max(1.5, parseFloat((currentPm25 * (1 + diurnal - rainScrubbing - windDecay) + pm25Noise).toFixed(6)));
-        const pred10 = Math.max(3.0, parseFloat((currentPm10 * (1 + diurnal * 1.15 - rainScrubbing * 1.1 - windDecay) + pm10Noise).toFixed(6)));
-
-        predictionsMap[`PM2.5_target_${h}h`] = pred25;
-        predictionsMap[`PM10_target_${h}h`] = pred10;
-
-        currentPm25 = pred25;
-        currentPm10 = pred10;
-      }
-
-      // Construct exact JSON schema
-      const rawPayload = {
-        station_id: stationId,
-        based_on_timestamp: now.toISOString(),
-        predictions: predictionsMap
-      };
-
-      const enriched = this.formatMLResponse(rawPayload, baselinePm25, baselinePm10);
-      this.modelMeta.status = 'Engine Synchronized (Direct In-Memory)';
-      return enriched;
     },
 
     /**
