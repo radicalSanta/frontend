@@ -10,11 +10,7 @@
   }
 
   const BackendConfig = {
-    baseUrl: normalizeBaseUrl(
-      (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_BASE_URL)
-        ? import.meta.env.VITE_API_BASE_URL
-        : DEFAULT_API_BASE_URL
-    ),
+    baseUrl: normalizeBaseUrl(DEFAULT_API_BASE_URL),
 
     endpoint(path) {
       return this.baseUrl + '/' + String(path || '').replace(/^\/+/, '');
