@@ -53,20 +53,7 @@
   updateLiveClock();
   const clockInterval = setInterval(updateLiveClock, 1000);
 
-  function startLivePulseLoop() {
-    // Periodically pulse live data (every 20s) to give the operational feeling
-    setInterval(() => {
-      if (window.DataService && typeof window.DataService.simulateLivePulse === 'function') {
-        window.DataService.simulateLivePulse();
-        if (window.DashboardController && typeof window.DashboardController.refreshCurrentLocationData === 'function') {
-          window.DashboardController.refreshCurrentLocationData();
-        }
-        updateLiveClock();
-      }
-    }, 20000);
-  }
-
-  /**
+   /**
    * Master application initialization sequence
    */
   async function initApp() {
@@ -134,17 +121,11 @@
         topbarRefreshBtn.classList.add('animate-spin');
         updateLiveClock();
         try {
-          if (window.OpenMeteoService) {
-            window.OpenMeteoService.clearCache();
-          }
-          if (window.DashboardController) {
-            await window.DashboardController.refreshCurrentLocationData();
-          }
-          if (window.MLController) {
-            await window.MLController.runInference();
+          if (window.LiveAPI) {
+            await window.LiveAPI.fetchLatest();
           }
         } catch (refreshErr) {
-          console.warn('Manual refresh error:', refreshErr);
+          console.warn('Manual live refresh error:', refreshErr);
         } finally {
           updateLiveClock();
           setTimeout(() => {
@@ -154,8 +135,14 @@
       });
     }
 
-    // 8. Start Simulated Pulse Loop
-    startLivePulseLoop();
+    // 8. Start live backend polling (single source of truth for current readings).
+    try {
+      if (window.LiveDashboard) {
+        window.LiveDashboard.init();
+      }
+    } catch (liveErr) {
+      console.warn('Live backend initialization error:', liveErr);
+    }
 
     // 9. Initialize Lucide icons if loaded
     if (typeof window.lucide !== 'undefined' && window.lucide.createIcons) {
