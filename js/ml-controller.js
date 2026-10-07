@@ -371,55 +371,39 @@
      * Run inference by pulling historical Open-Meteo baseline and calling Backend ML Service
      */
     async runInference() {
-      // 1. Fetch latest historical baseline from OpenMeteoService if not loaded
-      let openMeteoData = null;
-      if (window.OpenMeteoService) {
-        openMeteoData = await window.OpenMeteoService.fetchHistoricalData();
-        this.historicalAQI = openMeteoData.historicalAirQuality;
-      }
+      try {
+        // The dashboard endpoint is now the single source of truth.
+        const payload = await window.LiveAPI?.fetchLatest();
+        const data = payload || window.LiveAPI?.latest;
 
-      // Check selected station for station-specific baseline
-      let stationName = 'Regional Monitoring Station';
-      let baselinePm25 = openMeteoData?.current?.pm25 ?? 14.2;
-      let baselinePm10 = openMeteoData?.current?.pm10 ?? 26.5;
-
-      if (this.selectedStationId) {
-        let loc = null;
-        if (window.DataService && typeof window.DataService.getLocation === 'function') {
-          loc = window.DataService.getLocation(this.selectedStationId);
-        } else if (window.DataService && typeof window.DataService.getLocationById === 'function') {
-          loc = await window.DataService.getLocationById(this.selectedStationId);
-        } else if (window.environmentalData?.locations) {
-          loc = window.environmentalData.locations.find(l => l.id === this.selectedStationId);
+        if (!data) {
+          throw new Error('No live dashboard response available');
         }
 
-        if (loc && loc.current) {
-          stationName = loc.name;
-          if (typeof loc.current.pm25 === 'number') baselinePm25 = loc.current.pm25;
-          if (typeof loc.current.pm10 === 'number') baselinePm10 = loc.current.pm10;
+        const stationId = data.stationId || 1;
+        const predictions = data?.pollution?.prediction || data?.pollution?.predictions;
+
+        if (predictions && window.MLService) {
+          this.currentPredictions = window.MLService.formatMLResponse(
+            {
+              station_id: stationId,
+              based_on_timestamp: data.timestamp || new Date().toISOString(),
+              predictions
+            },
+            Number(data?.pollution?.pm25 ?? 0),
+            Number(data?.pollution?.pm10 ?? 0)
+          );
+        } else {
+          this.currentPredictions = null;
         }
+
+        this.renderHorizonCards();
+        this.renderTransitionChart();
+        this.updateDiagnosticsUI();
+      } catch (error) {
+        console.warn('Live ML dashboard update failed:', error);
+        this.updateDiagnosticsUI();
       }
-
-      const recentPrecip = openMeteoData?.current?.precipitationMm ?? 0;
-
-      // 2. Call backend ML prediction service
-      if (window.MLService) {
-        this.currentPredictions = await window.MLService.fetchPredictions({
-          baselinePm25,
-          baselinePm10,
-          recentPrecipitation: recentPrecip,
-          trafficFactor: this.simulationParams.trafficFactor,
-          rainSimulationMm: this.simulationParams.rainSimulationMm,
-          windDispersion: this.simulationParams.windDispersion,
-          stationId: this.selectedStationId,
-          stationName
-        });
-      }
-
-      // 3. Render UI components
-      this.renderHorizonCards();
-      this.renderTransitionChart();
-      this.updateDiagnosticsUI();
     },
 
     /**
